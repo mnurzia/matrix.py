@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-import shutil
 import random
 import time
 import sys
@@ -14,7 +13,7 @@ __VERSION__ = "v0.1"
 # by illinoisjackson: https://github.com/illinoisjackson
 
 if sys.version_info <= (3,0):
-    _PY2 = 1
+	_PY2 = 1
 else:
 	_PY2 = 0
 
@@ -54,10 +53,11 @@ class ScreenSpace:
 		curses.endwin()
 
 class Fade:
-	def __init__(self,starttick,x,y,colors,unics,length,lifetime,speed):
+	def __init__(self,starttick,x,y,headcolor,colors,unics,length,lifetime,speed):
 		self.st		= starttick 
 		self.colors	= colors
 		self.lcolors= len(self.colors)
+		self.headcolor = headcolor
 		self.unics	= unics
 		self.length = length
 		self.lt		= lifetime
@@ -68,8 +68,11 @@ class Fade:
 	def render(self,tick,screenspace):
 		self.time += 1
 		for i in range(self.length):
+			if i == 0:
+				self.pendingcolor = self.headcolor
+			else:
+				self.pendingcolor = self.colors[int((i/self.length)*self.lcolors)]
 			self.pendingchar  = random.choice(self.unics)
-			self.pendingcolor = self.colors[int((i/self.length)*self.lcolors)]
 			screenspace.addchar(self.pos[0],round(self.pos[1])-i,self.pendingchar, \
 					self.pendingcolor)
 		self.pos[1] += self.speed
@@ -78,7 +81,46 @@ class Fade:
 	def destroy(self):
 		self = None
 
-def main(stdscr,params):
+
+def print_error(s):
+	print("\x1b[31m%s" % s)
+
+def parse_chars(chrl,argp):
+	charlist = []
+	try:
+		chrl = chrl.split(",")
+		for chrr in chrl:
+			if "-" in chrr:
+				dashs = chrr.split("-")
+				if len(dashs) == 2:
+					charlist.extend(range(int(dashs[0]),int(dashs[1])))
+			elif chrr != "":
+				charlist.append(int(chrr))
+			assert len(charlist) > 0
+		return charlist
+	except:
+		argp.print_help()
+		print_error("Could not parse characters list!")
+		sys.exit(1)
+
+def parse_colors(cll,argp):
+	headcolor = None
+	colorlist = []
+	try:
+		mtchs = re.finditer(r"(\d*\!?)", cll)
+		for mt in mtchs:
+			mtchg = mt.group()
+			if "!" in mtchg:
+				headcolor = int(mtchg.strip("!"))
+			elif mtchg != "":
+				colorlist.append(int(mtchg))
+		return headcolor,colorlist
+	except:
+		argp.print_help()
+		print_error("Could not parse colors list!")
+		sys.exit(1)
+		
+def main(stdscr,params,chars):
 	STARTTIME = time.time()
 	PARAMS = params
 	FADES	= [None for fd in range(PARAMS.fades)]
@@ -86,28 +128,30 @@ def main(stdscr,params):
 	SCSP = ScreenSpace(stdscr)
 	for fade in range(PARAMS.fades):
 		FADES[fade] = Fade(
-						TICK,
-						random.randint(0,SCSP.size[1]),
-						random.randint(0,SCSP.size[0]),
-						[int(j) for j in PARAMS.colors.rstrip(",").split(",")],
-						range(32,128),
-						random.randint(PARAMS.minlength,PARAMS.maxlength),
-						random.uniform(PARAMS.minlifetime,PARAMS.maxlifetime),
-						random.uniform(PARAMS.minspeed,PARAMS.maxspeed))
+				TICK,
+				random.randint(0,SCSP.size[1]),
+				random.randint(0,SCSP.size[0]),
+				PARAMS.headcolor,
+				[int(j) for j in PARAMS.colors.rstrip(",").split(",")],
+				chars,
+				random.randint(PARAMS.minlength,PARAMS.maxlength),
+				random.uniform(PARAMS.minlifetime,PARAMS.maxlifetime),
+				random.uniform(PARAMS.minspeed,PARAMS.maxspeed))
 	try:
 		while True:
 			time.sleep(PARAMS.delay)
 			for fade in range(PARAMS.fades):
 				if FADES[fade].dstd == 1:
 					FADES[fade] = Fade(
-							TICK,
-							random.randint(0,SCSP.size[1]),
-							random.randint(0,SCSP.size[0]),
-							[int(j) for j in PARAMS.colors.rstrip(",").split(",")],
-							range(32,128),
-							random.randint(PARAMS.minlength,PARAMS.maxlength),
-							random.uniform(PARAMS.minlifetime,PARAMS.maxlifetime),
-							random.uniform(PARAMS.minspeed,PARAMS.maxspeed))
+				TICK,
+				random.randint(0,SCSP.size[1]),
+				random.randint(0,SCSP.size[0]),
+				PARAMS.headcolor,
+				[int(j) for j in PARAMS.colors.rstrip(",").split(",")],
+				chars,
+				random.randint(PARAMS.minlength,PARAMS.maxlength),
+				random.uniform(PARAMS.minlifetime,PARAMS.maxlifetime),
+				random.uniform(PARAMS.minspeed,PARAMS.maxspeed))
 			for fade in FADES:
 				fade.render(TICK,SCSP)
 			if SCSP.win.getch() == ord('q'):
@@ -128,6 +172,20 @@ def main(stdscr,params):
 		SCSP.destroy()
 		sys.exit()
 
+def colortest(stdscr):
+	# http://stackoverflow.com/questions/18551558/how-to-use-terminal-color-palette-with-curses
+	curses.start_color()
+	curses.use_default_colors()
+	stdscr.addstr(0,0,"%s colors on %s.\n" % (str(curses.COLORS),str(curses.termname())))
+	for i in range(0, curses.COLORS):
+		curses.init_pair(i + 1, i, -1)
+	for i in range(curses.COLORS):
+		try:
+			stdscr.addstr(str(i)+"\t",curses.color_pair(i))
+		except:
+			pass
+	stdscr.getch()
+
 if __name__ == '__main__':
 	agp = argparse.ArgumentParser(description="A cool matrix effect for your terminal!")
 	agp.add_argument("-d", "--delay", type=float, default=0.1,
@@ -146,11 +204,23 @@ if __name__ == '__main__':
 					help="set minimum lifetime of fades (default 10)")
 	agp.add_argument("-mxlt", "--maxlifetime", type=int, default=30,
 					help="set maximum lifetime of fades (default 30)")
-	agp.add_argument("-c", "--colors", type=str, default="16,83,84,119,120",
+	agp.add_argument("-c", "--colors", type=str, default="83,84,119,120",
 					help="set fade colors.\n"+\
 					"Must be a comma separated list of values on the terminal's color palette.\n"+\
-					"(default 16,83,84,119,120)")
+					"(default 83,84,119,120)")
+	agp.add_argument("-cc", "--headcolor", type=int, default=16,
+					help="set fade head color. (default 16)")
+	agp.add_argument("-C", "--chars", type=str, default="32-128",
+					help="set fade characters. Is a comma separated list of unicode ranges.\n"+\
+					"Can be one character or a range. [Example: -C 32-55,66,2605,2606,6785-8941]\n"+\
+					"(default 32-128)")
 	agp.add_argument("-g", "--debug", action="store_true",
 					help="show debug statistics in upper left corner")
+	agp.add_argument("-t", "--colortest", action="store_true",
+					help="output a color test screen")
 	args = agp.parse_args()
-	curses.wrapper(main,args)
+	if args.colortest == True:
+		curses.wrapper(colortest)
+	else:
+		chars = parse_chars(args.chars, agp)
+		curses.wrapper(main,args,chars)
